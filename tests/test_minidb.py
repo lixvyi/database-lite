@@ -1,0 +1,89 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from minidb import Database
+from minidb.errors import LexicalError, SemanticError, SyntaxError, PermissionDenied
+from minidb.lexer import Lexer
+from minidb.parser import Parser
+from minidb.storage.disk import DiskManager
+from minidb.storage.page import SlottedPage
+
+
+class CompilerTests(unittest.TestCase):
+    def test_token_position_comments_strings_and_case(self):
+        tokens=Lexer("-- hi\nSeLeCt name FROM t WHERE name != 'Tom''s';").tokenize()
+        self.assertEqual(tokens[0].lexeme,"SELECT");self.assertEqual((tokens[0].location.line,tokens[0].location.column),(2,1))
+        self.assertEqual(next(t.value for t in tokens if t.lexeme.startswith("'")),"Tom's")
+    def test_precedence(self):
+        stmt=Parser("SELECT * FROM t WHERE a=1 OR b=2 AND c=3;").parse_all()[0]
+        self.assertEqual(stmt.where.operator,"OR");self.assertEqual(stmt.where.right.operator,"AND")
+    def test_update_and_order_by_ast(self):
+        update,select=Parser("UPDATE t SET score=score+5,name='B' WHERE id=2; SELECT name FROM t ORDER BY score DESC,name;").parse_all()
+        self.assertEqual([name for name,_ in update.assignments],["score","name"])
+        self.assertEqual([(item.column,item.direction) for item in select.order_by],[("score","DESC"),("name","ASC")])
+    def test_precise_errors(self):
+        with self.assertRaises(LexicalError) as e:Lexer("SELECT @;").tokenize()
+        self.assertEqual(e.exception.location.column,8)
+        with self.assertRaises(SyntaxError):Parser("SELECT a FROM t WHERE a AND;").parse_all()
+
+
+class StorageTests(unittest.TestCase):
+    def test_page_slot_and_tombstone(self):
+        p=SlottedPage(0);slot=p.insert("中文记录".encode());self.assertEqual(p.read(slot).decode(),"中文记录")
+        self.assertTrue(p.delete(slot));self.assertIsNone(p.read(slot))
+    def test_page_id_maps_to_file_offset(self):
+        with tempfile.TemporaryDirectory() as d:
+            disk=DiskManager(Path(d)/"data.syp");a=disk.allocate();b=disk.allocate()
+            self.assertEqual((a.page_id,b.page_id,disk.path.stat().st_size),(0,1,8192))
+
+
+class EndToEndTests(unittest.TestCase):
+    def setUp(self):self.tmp=tempfile.TemporaryDirectory();self.db=Database(self.tmp.name,2)
+    def tearDown(self):self.db.close();self.tmp.cleanup()
+    def test_pipeline_crud_and_optimization(self):
+        self.db.execute("CREATE TABLE student(id INT,name VARCHAR(20),age INT);")
+        self.db.execute("INSERT INTO student(id,name,age) VALUES (1,'Alice',20);")
+        info=self.db.inspect("SELECT name FROM student WHERE 1=1 AND age>10+8;")[0]
+        self.assertIn("10",info["plan_before"]);self.assertIn("18",info["plan_after"]);self.assertNotIn("1 = 1",info["plan_after"])
+        result=self.db.execute("SELECT name FROM student WHERE age>18;")[0]
+        self.assertEqual(result["rows"],[{"name":"Alice"}])
+        self.assertEqual(self.db.execute("DELETE FROM student WHERE id=1;")[0]["affected"],1)
+    def test_semantic_type_and_name_checks(self):
+        self.db.execute("CREATE TABLE t(id INT,name VARCHAR(10));")
+        with self.assertRaises(SemanticError):self.db.execute("SELECT missing FROM t;")
+        with self.assertRaises(SemanticError):self.db.execute("INSERT INTO t(id,name) VALUES ('bad',1);")
+        with self.assertRaises(SemanticError):self.db.execute("UPDATE t SET missing=1;")
+        with self.assertRaises(SemanticError):self.db.execute("DELETE FROM pg_catalog;")
+    def test_update_order_by_and_system_catalog(self):
+        self.db.execute("CREATE TABLE scores(id INT,name VARCHAR(10),score INT); INSERT INTO scores(id,name,score) VALUES(1,'A',70); INSERT INTO scores(id,name,score) VALUES(2,'B',80); INSERT INTO scores(id,name,score) VALUES(3,'C',80);")
+        changed=self.db.execute("UPDATE scores SET score=score+5 WHERE id=2;")[0]
+        self.assertEqual(changed["affected"],1)
+        rows=self.db.execute("SELECT name,score FROM scores ORDER BY score DESC,name ASC;")[0]["rows"]
+        self.assertEqual(rows,[{"name":"B","score":85},{"name":"C","score":80},{"name":"A","score":70}])
+        catalog=self.db.execute("SELECT table_name,column_name FROM pg_catalog WHERE table_name='scores' ORDER BY column_name;")[0]["rows"]
+        self.assertEqual([r["column_name"] for r in catalog],["id","name","score"])
+    def test_duplicate_bulk_delete_and_restart_persistence(self):
+        self.db.execute("CREATE TABLE bulk(id INT,name VARCHAR(20));")
+        with self.assertRaises(SemanticError):self.db.execute("CREATE TABLE bulk(other INT);")
+        inserts="".join(f"INSERT INTO bulk(id,name) VALUES({i},'row{i}');" for i in range(300))
+        self.db.execute(inserts)
+        rows=self.db.execute("SELECT id FROM bulk WHERE id>=290 ORDER BY id DESC;")[0]["rows"]
+        self.assertEqual([r["id"] for r in rows],list(range(299,289,-1)))
+        self.assertEqual(self.db.execute("DELETE FROM bulk WHERE id>=295;")[0]["affected"],5)
+        root=self.tmp.name;self.db.close();self.db=Database(root,2)
+        remaining=self.db.execute("SELECT id FROM bulk WHERE id>=290 ORDER BY id;")[0]["rows"]
+        self.assertEqual([r["id"] for r in remaining],[290,291,292,293,294])
+        self.assertFalse((Path(root)/"catalog.json").exists())
+        self.assertEqual(self.db.store.read_page(0)[:4],b"CAT1")
+        self.assertGreaterEqual(self.db.stats()["allocated_pages"],3)
+    def test_column_row_and_action_permission(self):
+        self.db.execute("CREATE TABLE staff(id INT,name VARCHAR(20),dept VARCHAR(20)); INSERT INTO staff(id,name,dept) VALUES(1,'A','CS'); INSERT INTO staff(id,name,dept) VALUES(2,'B','EE');")
+        self.db.auth.grant("alice","staff",{"SELECT"},{"name","dept"},lambda r:r["dept"]=="CS")
+        rows=self.db.execute("SELECT name,dept FROM staff;",user="alice")[0]["rows"]
+        self.assertEqual(rows,[{"name":"A","dept":"CS"}])
+        with self.assertRaises(PermissionDenied):self.db.execute("SELECT id FROM staff;",user="alice")
+        with self.assertRaises(PermissionDenied):self.db.execute("DELETE FROM staff;",user="alice")
+
+
+if __name__=="__main__":unittest.main()

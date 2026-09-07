@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.db
+minidb_data/
+minidb_demo/
+os_sim_data/
+os_sim_demo/
+.pytest_cache/
+.coverage
+.DS_Store
+tmp/
+docs/assets/accepted-concept.png
+docs/assets/ppt2-montage.png
+docs/assets/browser-1440.png
+docs/assets/minidb-lab-1440.png
