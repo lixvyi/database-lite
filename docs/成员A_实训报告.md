@@ -1,4 +1,4 @@
-# 成员 A 实训报告：SQL 编译前端与规则优化
+# 成员 A 实训报告：SQL 编译器
 
 ## 工作目标
 
@@ -6,9 +6,9 @@
 
 ## 主要实现
 
-Lexer 逐字符扫描并维护 offset、line、column，区分关键字、标识符、数值、字符串、操作符与分隔符。Parser 使用递归下降，每个函数对应一个非终结符；分层调用保证乘除、加减、比较、NOT、AND、OR 的优先级。AST 只保存结构、值和源码位置，不耦合执行器。第三阶段从指导书可选项中实现 UPDATE 与 ORDER BY：Parser 分别构造赋值列表和排序键，SemanticAnalyzer 检查目标列、表达式类型、排序列存在性。
+Lexer 逐字符扫描并维护 offset、line、column，区分关键字、标识符、数值、字符串、操作符与分隔符。Parser 使用递归下降，每个函数对应一个非终结符；分层调用保证乘除、加减、比较、NOT、AND、OR 的优先级。AST 只保存结构、值和源码位置，不耦合执行器。本部分只选择 UPDATE 与 ORDER BY 两项扩展。
 
-SemanticAnalyzer 把标识符绑定到 Catalog 列定义，并集中处理类型规则。PlanBuilder 将 SELECT 转换为 SeqScan、Filter、Sort、Project，将 UPDATE 转为 Update、Filter、SeqScan。Optimizer 深拷贝原计划后执行常量折叠、布尔化简和恒真 Filter 删除，因此可以并排展示优化前后结构。
+SemanticAnalyzer 把标识符绑定到 Catalog 列定义，检查重复表、重复列、类型、列数和 `VARCHAR(n)` 长度。PlanBuilder 将 SELECT 转换为 SeqScan、Filter、Sort、Project，将 UPDATE 转为 Update、Filter、SeqScan。Optimizer 深拷贝原计划后执行常量折叠、布尔化简和恒真 Filter 删除，因此可以并排展示优化前后结构。
 
 ## 问题与定位
 

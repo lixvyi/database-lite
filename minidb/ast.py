@@ -38,5 +38,3 @@ class DeleteStmt(Statement): table: str = ""; where: Expr | None = None
 @dataclass
 class UpdateStmt(Statement):
     table: str = ""; assignments: list[tuple[str, Expr]] = field(default_factory=list); where: Expr | None = None
-@dataclass
-class ExplainStmt(Statement): statement: Statement | None = None

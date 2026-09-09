@@ -1,14 +1,14 @@
-# 成员 B 实训报告：页式存储、执行与系统机制
+# 成员 B 实训报告：操作系统页式存储
 
 ## 工作目标
 
-不借助现成数据库完成行数据编码、分页、缓存、持久化和算子执行，并解释逻辑表到磁盘字节的映射。
+实现固定页文件、缓存、替换策略和持久化页接口，为数据库引擎提供统一的底层访问能力。
 
 ## 主要实现
 
-PageFile 将 `page_id` 映射为 `page_id × 4096`，并按 64 页 Extent 管理空闲位图。SlottedPage 使用页头、槽目录和从页尾反向增长的记录区；RID 由页号和槽号组成。RecordCodec 使用 NULL bitmap、8 字节整数和长度前缀 UTF-8 字符串。PagedCatalog 固定在页 0，用户表通过 `first_page` 与 Page 的 `next_page` 映射为物理页链。
+PageFile 将 `page_id` 映射为 `page_id × 4096`，使用位图管理页面分配、释放和复用。PageCache 通过 OrderedDict 实现 LRU/FIFO，pin 保护使用中页，dirty 控制写回，并记录命中、未命中、淘汰和刷新事件。
 
-StorageService 用 OrderedDict 表达 LRU/FIFO，pin 保护使用中页，dirty 控制写回；WAL 屏障保证日志先于数据页落盘，checkpoint 和 generation 支持重启恢复。Executor 按算子树拉取记录，Delete 写 tombstone，Update 原槽更新或迁移 RID，Sort 完成稳定多键排序。RWLock 支持多读单写，Authorizer 组合业务动作、列集合和行过滤器。
+本部分只保留两个扩展。第一项是按 64 页 Extent 扩展文件，第二项是页级 redo WAL/Checkpoint。WAL 屏障保证日志先于数据页落盘，generation 支持幂等重放。查询调度器、Undo、MVCC 和索引不在实现范围。
 
 ## 问题与定位
 
@@ -16,8 +16,8 @@ Windows 测试结束时曾出现临时文件被占用，原因是 HTTPServer 只
 
 ## AI 辅助说明
 
-AI 协助整理页格式、测试清单和注释；页偏移、槽目录方向、缓存边界、权限时机和磁盘内容由项目组通过源码和测试验证。
+AI 协助整理页格式、测试清单和注释；页偏移、缓存边界、WAL 顺序和磁盘内容由项目组通过源码和测试验证。
 
 ## 收获
 
-本模块把文件 I/O、页、缓存、WAL、锁与记录、RID、执行器、Catalog 连接起来。行锁、Undo 和 MVCC 必须建立在当前明确边界之上。
+本模块把文件 I/O、固定页、缓存与 WAL 组合成稳定 PageStore 接口。更复杂的调度、Undo、MVCC 和索引留作后续方向。

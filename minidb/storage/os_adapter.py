@@ -16,5 +16,7 @@ class OSBufferAdapter:
     def unpin(self,page_id,dirty=False):
         page=self.pending.pop(page_id,None)
         if page is not None and (dirty or page.dirty):self.store.write_page(page_id,bytes(page.data))
+    def discard_page(self,page_id):
+        self.pending.pop(page_id,None);self.store.release_page(page_id)
     def flush_all(self):self.store.checkpoint()
     def stats(self):return self.store.stats()

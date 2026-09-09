@@ -1,7 +1,7 @@
 import argparse
 import json
 from pathlib import Path
-from os_sim import QueryScheduler,StorageService
+from os_sim import StorageService
 from os_sim.page_file import PAYLOAD_SIZE
 
 
@@ -20,12 +20,8 @@ def main():
     read=sub.add_parser("read");read.add_argument("page_id",type=int)
     write=sub.add_parser("write");write.add_argument("page_id",type=int);write.add_argument("text")
     sub.add_parser("checkpoint")
-    queue=sub.add_parser("queue-demo");queue.add_argument("--queries",type=int,default=1000);queue.add_argument("--workers",type=int,default=8)
     args=parser.parse_args()
-    if args.command=="queue-demo":
-        scheduler=QueryScheduler(args.workers,64);futures=[scheduler.submit(lambda x:x*x,i) for i in range(args.queries)];[f.result() for f in futures]
-        print(json.dumps(scheduler.stats(),ensure_ascii=False,indent=2));scheduler.close();return
-    store=StorageService(Path(args.data),args.cache_pages,args.policy,background_interval=1.0)
+    store=StorageService(Path(args.data),args.cache_pages,args.policy)
     try:
         if args.command=="status":result={"stats":store.stats(),"allocated":[p for p in store.page_directory() if p["allocated"]]}
         elif args.command=="allocate":result={"page_id":store.allocate_page()}

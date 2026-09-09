@@ -14,6 +14,8 @@ class PageCache:
     """LRU/FIFO 可切换缓存；缓存数据页，目录和 WAL 由独立持久化路径管理。"""
     def __init__(self,page_file,wal,capacity=16,policy="LRU",event_limit=2000):
         if policy not in ("LRU","FIFO"):raise ValueError("policy must be LRU or FIFO")
+        if capacity<=0:raise ValueError("capacity must be a positive integer")
+        if event_limit<=0:raise ValueError("event_limit must be a positive integer")
         self.file,self.wal,self.capacity,self.policy=page_file,wal,capacity,policy;self.frames=OrderedDict();self.lock=RLock()
         self.hits=self.misses=self.evictions=self.flushes=0;self.events=[];self.event_limit=event_limit
     def _log(self,event,page_id,**extra):

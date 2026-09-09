@@ -41,6 +41,7 @@ class ApiTest(unittest.TestCase):
     def test_minidb_api_exposes_plan_catalog_and_pages(self):
         status,data=self.request("POST","/api/minidb/inspect",{"sql":"SELECT name FROM student ORDER BY age DESC;"})
         self.assertEqual(status,200);self.assertIn("Sort",data["result"][0]["plan_after"])
+        self.assertEqual(data["result"][0]["semantic"],"passed")
         self.assertIn("catalog",data["system"]);self.assertGreaterEqual(len(data["system"]["allocated_pages"]),2)
 
     def test_create_book(self):

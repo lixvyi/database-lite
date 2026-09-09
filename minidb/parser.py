@@ -23,14 +23,12 @@ class Parser:
         while self.current.type != TokenType.EOF: stmts.append(self.statement())
         return stmts
     def statement(self):
-        if self.match("EXPLAIN"):
-            loc = self.tokens[self.i-1].location; return ExplainStmt(loc, self.statement())
         if self.match("CREATE"): stmt = self.create()
         elif self.match("INSERT"): stmt = self.insert()
         elif self.match("SELECT"): stmt = self.select()
         elif self.match("DELETE"): stmt = self.delete()
         elif self.match("UPDATE"): stmt = self.update()
-        else: raise SyntaxError(f"unexpected token {self.current.lexeme!r}", self.current.location, ["CREATE","INSERT","SELECT","DELETE","UPDATE","EXPLAIN"])
+        else: raise SyntaxError(f"unexpected token {self.current.lexeme!r}", self.current.location, ["CREATE","INSERT","SELECT","DELETE","UPDATE"])
         self.expect(";"); return stmt
     def create(self):
         loc=self.tokens[self.i-1].location; self.expect("TABLE"); table=self.identifier().lexeme; self.expect("("); cols=[]
@@ -114,8 +112,6 @@ class Parser:
         if t.type==TokenType.IDENTIFIER: self.i+=1; return IdentifierExpr(t.location,t.lexeme)
         if t.type in (TokenType.INTEGER,TokenType.FLOAT,TokenType.STRING):
             self.i+=1; return LiteralExpr(t.location,t.value,{TokenType.INTEGER:"INT",TokenType.FLOAT:"FLOAT",TokenType.STRING:"VARCHAR"}[t.type])
-        if self.match("TRUE","FALSE"): return LiteralExpr(t.location,t.lexeme=="TRUE","BOOL")
-        if self.match("NULL"): return LiteralExpr(t.location,None,"NULL")
         if self.match("("):
             expr=self.expression(); self.expect(")"); return expr
         raise SyntaxError(f"unexpected token {t.lexeme!r}",t.location,["IDENTIFIER","CONST","(","NOT"])

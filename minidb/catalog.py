@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from .errors import SemanticError
 import struct
+from .storage.page import MAGIC as PAGE_MAGIC, NO_PAGE, SlottedPage
+from .storage.record import RecordCodec
 
 
 @dataclass
@@ -28,6 +30,7 @@ class Catalog:
         key=schema.name.lower()
         if key in self.tables: raise SemanticError(f"table '{schema.name}' already exists")
         self.tables[key]=schema; self.save()
+    def exists(self,name):return name.lower() in self.tables
     def table(self,name,location=None):
         t=self.tables.get(name.lower())
         if not t: raise SemanticError(f"table '{name}' does not exist",location)
@@ -39,11 +42,12 @@ class Catalog:
 
 
 class PagedCatalog:
-    """保留物理页 0 上的特殊系统表；所有元数据与用户数据共用页服务。"""
-    MAGIC=b"CAT1";HEADER=struct.Struct("<4sI")
+    """物理页 0 起始的特殊系统表；目录行使用与用户表相同的槽页和行编码。"""
+    LEGACY_MAGIC=b"CAT1";LEGACY_HEADER=struct.Struct("<4sI")
     SYSTEM_SCHEMA=TableSchema("pg_catalog",[
         ColumnSchema("table_name","VARCHAR",128),ColumnSchema("column_name","VARCHAR",128),
-        ColumnSchema("data_type","VARCHAR",16),ColumnSchema("length","INT"),ColumnSchema("first_page","INT")])
+        ColumnSchema("data_type","VARCHAR",16),ColumnSchema("length","INT"),
+        ColumnSchema("column_order","INT"),ColumnSchema("first_page","INT")])
     def __init__(self,page_store):
         self.store=page_store;self.page_id=self._ensure_page();self.tables={};self.load()
     def _ensure_page(self):
@@ -56,17 +60,35 @@ class PagedCatalog:
         return 0
     def load(self):
         raw=self.store.read_page(self.page_id)
-        if raw[:4]!=self.MAGIC:self.tables={};self.save();return
-        _,size=self.HEADER.unpack_from(raw);data=json.loads(raw[self.HEADER.size:self.HEADER.size+size].decode("utf-8"))
-        self.tables={n:TableSchema(n,[ColumnSchema(**c) for c in t["columns"]],t.get("first_page")) for n,t in data.items()}
+        if raw[:4]==self.LEGACY_MAGIC:
+            _,size=self.LEGACY_HEADER.unpack_from(raw);data=json.loads(raw[self.LEGACY_HEADER.size:self.LEGACY_HEADER.size+size].decode("utf-8"))
+            self.tables={n:TableSchema(n,[ColumnSchema(**c) for c in t["columns"]],t.get("first_page")) for n,t in data.items()};self.save();return
+        if raw[:4]!=PAGE_MAGIC:self.tables={};self.save();return
+        grouped={}
+        for row in self._stored_rows():
+            grouped.setdefault(row["table_name"],[]).append(row)
+        self.tables={}
+        for name,rows in grouped.items():
+            rows.sort(key=lambda row:row["column_order"])
+            columns=[ColumnSchema(row["column_name"],row["data_type"],row["length"]) for row in rows]
+            self.tables[name.lower()]=TableSchema(name,columns,rows[0]["first_page"])
     def save(self):
-        encoded=json.dumps({n:asdict(t) for n,t in self.tables.items()},ensure_ascii=False,separators=(",",":")).encode("utf-8")
-        if self.HEADER.size+len(encoded)>4096:raise SemanticError("system catalog page is full")
-        self.store.write_page(self.page_id,self.HEADER.pack(self.MAGIC,len(encoded))+encoded+bytes(4096-self.HEADER.size-len(encoded)))
+        old_pages=self._catalog_pages()
+        pages=[SlottedPage(old_pages[0])]
+        for row in self.rows():
+            payload=RecordCodec.encode(self.SYSTEM_SCHEMA,row)
+            slot=pages[-1].insert(payload)
+            if slot is None:
+                page_id=old_pages[len(pages)] if len(pages)<len(old_pages) else self.store.allocate_page()
+                pages[-1].next_page=page_id;pages.append(SlottedPage(page_id))
+                if pages[-1].insert(payload) is None:raise SemanticError("one system catalog row is larger than one page")
+        for page in pages:self.store.write_page(page.page_id,bytes(page.data))
+        for page_id in old_pages[len(pages):]:self.store.release_page(page_id)
     def create_table(self,schema):
         key=schema.name.lower()
         if key in self.tables or key=="pg_catalog":raise SemanticError(f"table '{schema.name}' already exists or is reserved")
         self.tables[key]=schema;self.save()
+    def exists(self,name):return name.lower()=="pg_catalog" or name.lower() in self.tables
     def table(self,name,location=None):
         if name.lower()=="pg_catalog":return self.SYSTEM_SCHEMA
         table=self.tables.get(name.lower())
@@ -77,4 +99,18 @@ class PagedCatalog:
         if not col:raise SemanticError(f"column '{name}' does not exist in table '{table.name}'",location)
         return col
     def rows(self):
-        return [{"table_name":t.name,"column_name":c.name,"data_type":c.data_type,"length":c.length,"first_page":t.first_page} for t in self.tables.values() for c in t.columns]
+        return [{"table_name":t.name,"column_name":c.name,"data_type":c.data_type,"length":c.length,
+                 "column_order":i,"first_page":t.first_page}
+                for t in self.tables.values() for i,c in enumerate(t.columns)]
+    def _catalog_pages(self):
+        raw=self.store.read_page(0)
+        if raw[:4]!=PAGE_MAGIC:return [0]
+        pages=[];page_id=0
+        while page_id!=NO_PAGE:
+            if page_id in pages:raise RuntimeError("system catalog page chain contains a cycle")
+            pages.append(page_id);page=SlottedPage(page_id,self.store.read_page(page_id));page_id=page.next_page
+        return pages
+    def _stored_rows(self):
+        for page_id in self._catalog_pages():
+            page=SlottedPage(page_id,self.store.read_page(page_id))
+            for _,payload in page.records():yield RecordCodec.decode(self.SYSTEM_SCHEMA,payload)

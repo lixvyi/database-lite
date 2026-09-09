@@ -8,11 +8,11 @@ web
 
 ## Stack
 
-Delegated by the user: Python standard library HTTP server, SQLite, and native HTML/CSS/JavaScript. The stack minimizes setup and keeps database concepts visible for a two-week training project.
+Python standard library HTTP server, custom MiniDB core, SQLite-based independent library demo, and native HTML/CSS/JavaScript. The stack minimizes setup for a one-week training project.
 
 ## Users
 
-Primary users are a two-person student team completing and defending a systems practicum. Teachers evaluate the team through hidden tests, random code explanation, live modification, and debugging. The original reading-room interface remains an upper-layer demonstration.
+Primary users are a three-person student team. Responsibilities follow the three course modules: SQL compiler, operating-system storage, and database engine. Teachers may use hidden tests, random code explanation, live modification, and debugging.
 
 ## Product Purpose
 
@@ -20,7 +20,7 @@ Provide an inspectable teaching MiniDB that connects compiler theory, operating-
 
 ## Positioning
 
-Unlike a CRUD application backed by SQLite, the MiniDB core owns lexing, parsing, AST, semantics, plans, optimization, row encoding, pages, buffering, execution, locks, and authorization; every stage can be inspected during a classroom defense.
+The MiniDB core owns lexing, parsing, AST, semantics, plans, optimization, row encoding, pages, buffering and execution. The separate library demo uses SQLite and must not be presented as the MiniDB storage path.
 
 ## Operating Context
 
@@ -33,7 +33,7 @@ Used locally on a student computer for development, classroom demonstration, ass
 - Show dashboard totals and recent activity.
 - Seed realistic illustrative data and reset the local database safely.
 - Run without a separately installed database server or third-party Python packages.
-- Deliver source code, ER diagram, database design, API notes, test notes, and a two-week practicum report.
+- Deliver source code, architecture and grammar documentation, test evidence, three-person division notes, and a one-week practicum report.
 
 ## Evidence on Hand
 

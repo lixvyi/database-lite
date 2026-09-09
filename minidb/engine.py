@@ -1,7 +1,7 @@
+from copy import deepcopy
 from pathlib import Path
-from .ast import CreateTableStmt,ExplainStmt,InsertStmt,SelectStmt,DeleteStmt,UpdateStmt
-from .auth import Authorizer
-from .catalog import PagedCatalog
+from .ast import CreateTableStmt
+from .catalog import ColumnSchema,PagedCatalog,TableSchema
 from .execution import Executor
 from .lexer import Lexer
 from .optimizer import Optimizer
@@ -20,35 +20,26 @@ class Database:
         self.store=StorageService(root/"storage",buffer_pages,"LRU",dirty_ratio=.75)
         self.catalog=PagedCatalog(self.store);self.buffer=OSBufferAdapter(self.store);self.semantic=SemanticAnalyzer(self.catalog)
         self.builder=PlanBuilder();self.optimizer=Optimizer();self.executor=Executor(self.catalog,self.buffer,RecordCodec)
-        self.auth=Authorizer();self.auth.grant("admin","*",{"CREATE","INSERT","SELECT","DELETE","UPDATE"})
     def compile(self,sql):
         token_stream=Lexer(sql).tokenize();statements=Parser(sql).parse_all();compiled=[]
-        for ast in statements:
-            self.semantic.analyze(ast);before=self.builder.build(ast);after=self.optimizer.optimize(before)
-            compiled.append({"tokens":[t.to_dict() for t in token_stream],"ast":ast,"before":before,"after":after})
+        working=object.__new__(PagedCatalog);working.tables=deepcopy(self.catalog.tables);semantic=SemanticAnalyzer(working)
+        for index,ast in enumerate(statements):
+            semantic.analyze(ast);before=self.builder.build(ast);after=self.optimizer.optimize(before)
+            end=statements[index+1].location.offset if index+1<len(statements) else len(sql)+1
+            tokens=[t.to_dict() for t in token_stream if ast.location.offset<=t.location.offset<end]
+            compiled.append({"tokens":tokens,"ast":ast,"before":before,"after":after})
+            if isinstance(ast,CreateTableStmt):
+                working.tables[ast.table.lower()]=TableSchema(ast.table,[ColumnSchema(c.name,c.data_type,c.length) for c in ast.columns])
         return compiled
-    def execute(self,sql,user="admin"):
+    def execute(self,sql):
         results=[]
         for ast in Parser(sql).parse_all():
             self.semantic.analyze(ast);before=self.builder.build(ast);after=self.optimizer.optimize(before)
-            target=ast.statement if isinstance(ast,ExplainStmt) else ast
-            action="CREATE" if isinstance(target,CreateTableStmt) else "INSERT" if isinstance(target,InsertStmt) else "SELECT" if isinstance(target,SelectStmt) else "UPDATE" if isinstance(target,UpdateStmt) else "DELETE"
-            table=target.table;policy=self._authorize(user,table,action,target)
-            if isinstance(ast,ExplainStmt):
-                results.append({"before":before.children[0].format(),"after":after.children[0].format()});continue
-            results.append(self.executor.run(after,policy.row_filter if policy else None))
+            results.append(self.executor.run(after))
         self.buffer.flush_all();return results
     def inspect(self,sql):
         out=[]
-        for x in self.compile(sql):out.append({"tokens":x["tokens"],"ast":x["ast"].to_dict(),"plan_before":x["before"].format(),"plan_after":x["after"].format()})
+        for x in self.compile(sql):out.append({"tokens":x["tokens"],"ast":x["ast"].to_dict(),"semantic":"passed","plan_before":x["before"].format(),"plan_after":x["after"].format()})
         return out
-    def _authorize(self,user,table,action,stmt):
-        if user=="admin":return None
-        p=self.auth.policy(user,table,action)
-        columns=getattr(stmt,"columns",[]) or []
-        if isinstance(stmt,SelectStmt):columns=columns+[item.column for item in stmt.order_by]
-        if isinstance(stmt,UpdateStmt):columns=[name for name,_ in stmt.assignments]
-        if columns!=["*"]:self.auth.check_columns(p,columns)
-        return p
     def stats(self):return self.store.stats()
     def close(self):self.store.close()
