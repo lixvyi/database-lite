@@ -8,6 +8,7 @@ from .wal import WriteAheadLog
 class StorageService:
     """独立 OS 仿真实体：统一暴露页服务，内部组合文件、WAL 与内存缓存。"""
     def __init__(self,directory,cache_pages=16,policy="LRU",dirty_ratio=0.6):
+        if dirty_ratio<=0:raise ValueError("dirty_ratio must be positive")
         self.root=Path(directory);self.file=PageFile(self.root);self.wal=WriteAheadLog(self.root/"redo.wal")
         self.cache=PageCache(self.file,self.wal,cache_pages,policy);self.dirty_ratio=dirty_ratio;self.recovered_pages=self._recover()
     def _recover(self):

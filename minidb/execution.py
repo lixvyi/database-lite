@@ -54,8 +54,11 @@ class TableHeap:
             with self.buffer.page(pid) as page:
                 slot=page.insert(payload)
                 if slot is not None:return pid,slot
-        page=self.buffer.new_page();pid=page.page_id;slot=page.insert(payload);self.buffer.unpin(pid,True)
-        if slot is None:raise StorageError("record is larger than one page")
+        page=self.buffer.new_page();pid=page.page_id;slot=page.insert(payload)
+        if slot is None:
+            self.buffer.discard_page(pid)
+            raise StorageError("record is larger than one page")
+        self.buffer.unpin(pid,True)
         if schema.first_page is None:schema.first_page=pid;self.catalog.save()
         elif last is not None:
             with self.buffer.page(last) as previous:previous.next_page=pid
@@ -74,7 +77,7 @@ class TableHeap:
 class Executor:
     def __init__(self,catalog,buffer,codec):self.catalog=catalog;self.heap=TableHeap(catalog,buffer,codec);self.locks={}
     def lock(self,table):return self.locks.setdefault(table.lower(),RWLock())
-    def run(self,plan,row_filter=None):
+    def run(self,plan):
         kind=plan.kind
         if kind=="CreateTable":
             schema=TableSchema(plan.args["table"],[ColumnSchema(n,t,l) for n,t,l in plan.args["columns"]]);self.catalog.create_table(schema);return {"message":f"table '{schema.name}' created","affected":0}
@@ -88,14 +91,14 @@ class Executor:
         if kind=="Delete":
             schema=self.catalog.table(plan.args["table"]);lock=self.lock(schema.name);lock.acquire_write();affected=0
             try:
-                for rid,row in list(self._rows(plan.children[0],row_filter)):
+                for rid,row in list(self._rows(plan.children[0])):
                     if self.heap.delete(rid):affected+=1
             finally:lock.release_write()
             return {"message":f"{affected} row(s) deleted","affected":affected}
         if kind=="Update":
             schema=self.catalog.table(plan.args["table"]);lock=self.lock(schema.name);lock.acquire_write();affected=0
             try:
-                for rid,row in list(self._rows(plan.children[0],row_filter)):
+                for rid,row in list(self._rows(plan.children[0])):
                     original=dict(row);updated=dict(row)
                     for name,value in plan.args["assignments"]:
                         actual=next(c.name for c in schema.columns if c.name.lower()==name.lower())
@@ -106,7 +109,7 @@ class Executor:
         table_node=plan
         while table_node.children:table_node=table_node.children[0]
         lock=self.lock(table_node.args["table"]);lock.acquire_read()
-        try:rows=[row for _,row in self._rows(plan,row_filter)]
+        try:rows=[row for _,row in self._rows(plan)]
         finally:lock.release_read()
         return {"columns":list(rows[0]) if rows else self._columns(plan),"rows":rows,"affected":len(rows)}
     def _columns(self,plan):
@@ -114,22 +117,21 @@ class Executor:
         node=plan
         while node.children:node=node.children[0]
         return [c.name for c in self.catalog.table(node.args["table"]).columns]
-    def _rows(self,plan,row_filter=None):
+    def _rows(self,plan):
         if plan.kind=="SeqScan":
             schema=self.catalog.table(plan.args["table"])
             if schema.name.lower()=="pg_catalog":
                 for slot,row in enumerate(self.catalog.rows()):
-                    if row_filter is None or row_filter(row):yield (0,slot),row
+                    yield (0,slot),row
                 return
-            for rid,row in self.heap.scan(schema):
-                if row_filter is None or row_filter(row):yield rid,row
+            yield from self.heap.scan(schema)
         elif plan.kind=="Filter":
-            for rid,row in self._rows(plan.children[0],row_filter):
+            for rid,row in self._rows(plan.children[0]):
                 if evaluate(plan.args["predicate"],row):yield rid,row
         elif plan.kind=="Project":
-            for rid,row in self._rows(plan.children[0],row_filter):yield rid,{c:next(v for k,v in row.items() if k.lower()==c.lower()) for c in plan.args["columns"]}
+            for rid,row in self._rows(plan.children[0]):yield rid,{c:next(v for k,v in row.items() if k.lower()==c.lower()) for c in plan.args["columns"]}
         elif plan.kind=="Sort":
-            rows=list(self._rows(plan.children[0],row_filter))
+            rows=list(self._rows(plan.children[0]))
             for column,direction in reversed(plan.args["keys"]):
                 present=[];nulls=[]
                 for item in rows:

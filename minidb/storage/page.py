@@ -11,10 +11,13 @@ NO_PAGE=0xFFFFFFFF
 class SlottedPage:
     """4KB 变长记录页：页头从前增长，记录体从后向前增长。"""
     def __init__(self,page_id:int,data:bytes|None=None):
-        self.data=bytearray(data or bytes(PAGE_SIZE))
-        if data:
-            magic,pid,*_=HEADER.unpack_from(self.data)
+        if data is not None and len(data)!=PAGE_SIZE:raise StorageError(f"page {page_id} must be exactly {PAGE_SIZE} bytes")
+        self.data=bytearray(data if data is not None else bytes(PAGE_SIZE))
+        if data is not None:
+            magic,pid,count,start,end,_=HEADER.unpack_from(self.data)
             if magic!=MAGIC or pid!=page_id:raise StorageError(f"invalid page {page_id}")
+            if start!=HEADER.size+count*SLOT.size or not HEADER.size<=start<=end<=PAGE_SIZE:
+                raise StorageError(f"invalid page layout {page_id}")
         else: HEADER.pack_into(self.data,0,MAGIC,page_id,0,HEADER.size,PAGE_SIZE,NO_PAGE)
         self.page_id=page_id; self.dirty=False
     def meta(self):return HEADER.unpack_from(self.data)
@@ -34,6 +37,7 @@ class SlottedPage:
         _,_,count,_,_,_=self.meta()
         if slot<0 or slot>=count:raise StorageError(f"slot {slot} outside page {self.page_id}")
         off,length=SLOT.unpack_from(self.data,HEADER.size+slot*SLOT.size)
+        if length and (off<self.meta()[4] or off+length>PAGE_SIZE):raise StorageError(f"invalid slot {slot} in page {self.page_id}")
         return None if length==0 else bytes(self.data[off:off+length])
     def delete(self,slot):
         payload=self.read(slot)
