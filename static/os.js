@@ -3,7 +3,7 @@ const osButton = document.querySelector('#os-nav');
 osButton.onclick = async () => {
   document.querySelectorAll('.nav').forEach(button => button.classList.toggle('active', button === osButton));
   document.querySelector('#title').textContent = 'OS 存储仿真台';
-  document.querySelector('#subtitle').textContent = '观察页目录、内存缓存、WAL 屏障与任务队列';
+  document.querySelector('#subtitle').textContent = '观察页目录、内存缓存、WAL 屏障与检查点';
   document.querySelector('#primary').style.display = 'none';
   document.querySelector('#content').innerHTML = '<p>正在读取仿真状态…</p>';
   await renderOS();
@@ -30,7 +30,7 @@ async function renderOS() {
       <div class="os-metrics">${metrics.map(item => `<div class="os-metric"><small>${item[0]}</small><b>${item[1]}</b></div>`).join('')}</div>
       <section class="os-panel">
         <div class="section-head"><h3>页目录 · ${stats.allocated_pages}/${stats.total_pages} 已分配</h3><div class="os-actions">
-          <button class="secondary" data-os="allocate">分配页</button><button class="secondary" data-os="write">修改内存页</button><button class="primary" data-os="checkpoint">Checkpoint</button><button class="secondary" data-os="workload">运行 1000 查询</button>
+          <button class="secondary" data-os="allocate">分配页</button><button class="secondary" data-os="write">修改内存页</button><button class="primary" data-os="checkpoint">Checkpoint</button>
         </div></div>
         <div class="page-map">${pages}</div><h3>Buffer Frames</h3>${table(['Page', 'Generation', 'Dirty', 'Pin', 'Page LSN'], frames)}
         <p class="os-note">深色表示已分配页，朱红外框表示当前驻留内存。数据文件偏移 = page_id × 4096。</p>
@@ -57,7 +57,7 @@ async function osAction(action, state) {
   }
   try {
     const data = await api('/api/os/action', { method: 'POST', body: JSON.stringify(body) });
-    toast(action === 'workload' ? `1000 个查询完成，最大队列 ${data.result.max_depth}` : '操作完成');
+    toast('操作完成');
     await renderOS();
   } catch (error) { toast(error.message); }
 }

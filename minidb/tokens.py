@@ -22,4 +22,4 @@ class Token:
 
 KEYWORDS = {"CREATE","TABLE","INSERT","INTO","VALUES","SELECT","FROM","WHERE","DELETE",
             "UPDATE","SET","ORDER","BY","ASC","DESC",
-            "INT","VARCHAR","AND","OR","NOT","TRUE","FALSE","NULL","EXPLAIN"}
+            "INT","VARCHAR","AND","OR","NOT"}

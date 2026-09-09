@@ -1,5 +1,4 @@
 from pathlib import Path
-from threading import Event,Thread
 from .cache import PageCache
 from .errors import InvalidPage
 from .page_file import PAYLOAD_SIZE,PageFile
@@ -8,11 +7,9 @@ from .wal import WriteAheadLog
 
 class StorageService:
     """独立 OS 仿真实体：统一暴露页服务，内部组合文件、WAL 与内存缓存。"""
-    def __init__(self,directory,cache_pages=16,policy="LRU",dirty_ratio=0.6,background_interval=None):
+    def __init__(self,directory,cache_pages=16,policy="LRU",dirty_ratio=0.6):
         self.root=Path(directory);self.file=PageFile(self.root);self.wal=WriteAheadLog(self.root/"redo.wal")
         self.cache=PageCache(self.file,self.wal,cache_pages,policy);self.dirty_ratio=dirty_ratio;self.recovered_pages=self._recover()
-        self.stop_event=Event();self.writer=None
-        if background_interval:self.start_background_writer(background_interval)
     def _recover(self):
         recovered=0
         for record in self.wal.records():
@@ -48,14 +45,7 @@ class StorageService:
     def checkpoint(self):
         self.cache.flush_all();self.file.set_checkpoint(self.wal.durable_lsn)
         return {"checkpoint_lsn":self.file.checkpoint_lsn,"flushed_pages":self.cache.flushes}
-    def start_background_writer(self,interval=1.0):
-        if self.writer:return
-        def loop():
-            while not self.stop_event.wait(interval):self.flush_due(max_pages=max(1,self.cache.capacity//4))
-        self.writer=Thread(target=loop,name="os-sim-dirty-writer",daemon=True);self.writer.start()
     def stats(self):return {**self.cache.stats(),"wal_durable_lsn":self.wal.durable_lsn,"checkpoint_lsn":self.file.checkpoint_lsn,"recovered_pages":self.recovered_pages,"allocated_pages":sum(self.file.control["allocated"]),"total_pages":self.file.control["page_count"]}
     def page_directory(self):return self.file.page_directory()
     def close(self,clean=True):
-        self.stop_event.set()
-        if self.writer:self.writer.join(timeout=2)
         if clean:self.checkpoint()

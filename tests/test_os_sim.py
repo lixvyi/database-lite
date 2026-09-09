@@ -3,7 +3,7 @@ import unittest
 import json
 from pathlib import Path
 
-from os_sim import QueryScheduler,StorageService
+from os_sim import StorageService
 from os_sim.errors import InvalidPage,WriteBarrierError
 from os_sim.page_file import EXTENT_PAGES,PAYLOAD_SIZE
 
@@ -50,6 +50,14 @@ class CacheTests(unittest.TestCase):
                 s=StorageService(root,cache_pages=2,policy=policy);p=[s.allocate_page() for _ in range(3)]
                 s.read_page(p[0]);s.read_page(p[1]);s.read_page(p[0]);s.read_page(p[2]);keys=set(s.cache.frames);s.close();return keys
             self.assertEqual(resident(d1,"LRU"),{0,2});self.assertEqual(resident(d2,"FIFO"),{1,2})
+    def test_pinned_frames_are_not_evicted_and_events_are_recorded(self):
+        with tempfile.TemporaryDirectory() as d:
+            store=StorageService(d,cache_pages=1);first=store.allocate_page();second=store.allocate_page()
+            store.cache.fetch(first)
+            with self.assertRaises(RuntimeError):store.cache.fetch(second)
+            store.cache.unpin(first);store.cache.fetch(second);store.cache.unpin(second)
+            self.assertEqual([event["event"] for event in store.cache.events],["miss","evict","miss"])
+            store.close()
     def test_wal_barrier_prevents_unsafe_flush(self):
         with tempfile.TemporaryDirectory() as d:
             store=StorageService(d,dirty_ratio=2);pid=store.allocate_page();store.write_page(pid,payload("dirty"));store.wal.durable_lsn=0
@@ -67,14 +75,6 @@ class RecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             store=StorageService(d,dirty_ratio=2);pid=store.allocate_page();lsn=store.write_page(pid,payload("safe"));info=store.checkpoint()
             self.assertEqual(info["checkpoint_lsn"],lsn);self.assertEqual(store.stats()["dirty"],0);store.close()
-
-
-class SchedulerTests(unittest.TestCase):
-    def test_one_thousand_queries_complete_with_bounded_queue(self):
-        scheduler=QueryScheduler(workers=8,queue_capacity=64)
-        futures=[scheduler.submit(lambda x:x*x,i) for i in range(1000)]
-        self.assertEqual(sum(f.result() for f in futures),sum(i*i for i in range(1000)))
-        stats=scheduler.stats();self.assertEqual(stats["completed"],1000);self.assertLessEqual(stats["max_depth"],64);scheduler.close()
 
 
 if __name__=="__main__":unittest.main()

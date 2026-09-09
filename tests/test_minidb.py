@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from minidb import Database
-from minidb.errors import LexicalError, SemanticError, SyntaxError, PermissionDenied
+from minidb.errors import LexicalError, SemanticError, SyntaxError
 from minidb.lexer import Lexer
 from minidb.parser import Parser
 from minidb.storage.disk import DiskManager
@@ -22,6 +22,13 @@ class CompilerTests(unittest.TestCase):
         update,select=Parser("UPDATE t SET score=score+5,name='B' WHERE id=2; SELECT name FROM t ORDER BY score DESC,name;").parse_all()
         self.assertEqual([name for name,_ in update.assignments],["score","name"])
         self.assertEqual([(item.column,item.direction) for item in select.order_by],[("score","DESC"),("name","ASC")])
+    def test_inspect_multiple_dependent_statements_without_execution(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as d:
+            db=Database(d)
+            result=db.inspect("CREATE TABLE fresh(id INT); INSERT INTO fresh(id) VALUES(1); SELECT * FROM fresh;")
+            self.assertEqual([item["semantic"] for item in result],["passed","passed","passed"])
+            self.assertEqual([item["tokens"][0]["lexeme"] for item in result],["CREATE","INSERT","SELECT"])
+            self.assertFalse(db.catalog.exists("fresh"));db.close()
     def test_precise_errors(self):
         with self.assertRaises(LexicalError) as e:Lexer("SELECT @;").tokenize()
         self.assertEqual(e.exception.location.column,8)
@@ -45,6 +52,7 @@ class EndToEndTests(unittest.TestCase):
         self.db.execute("CREATE TABLE student(id INT,name VARCHAR(20),age INT);")
         self.db.execute("INSERT INTO student(id,name,age) VALUES (1,'Alice',20);")
         info=self.db.inspect("SELECT name FROM student WHERE 1=1 AND age>10+8;")[0]
+        self.assertEqual(info["semantic"],"passed")
         self.assertIn("10",info["plan_before"]);self.assertIn("18",info["plan_after"]);self.assertNotIn("1 = 1",info["plan_after"])
         result=self.db.execute("SELECT name FROM student WHERE age>18;")[0]
         self.assertEqual(result["rows"],[{"name":"Alice"}])
@@ -55,6 +63,21 @@ class EndToEndTests(unittest.TestCase):
         with self.assertRaises(SemanticError):self.db.execute("INSERT INTO t(id,name) VALUES ('bad',1);")
         with self.assertRaises(SemanticError):self.db.execute("UPDATE t SET missing=1;")
         with self.assertRaises(SemanticError):self.db.execute("DELETE FROM pg_catalog;")
+    def test_create_and_varchar_constraints_are_semantic_errors(self):
+        self.db.execute("CREATE TABLE t(id INT,name VARCHAR(3));")
+        self.db.execute("CREATE TABLE unlimited(name VARCHAR);")
+        with self.assertRaises(SemanticError):self.db.inspect("CREATE TABLE t(other INT);")
+        with self.assertRaises(SemanticError):self.db.execute("INSERT INTO t(id,name) VALUES(1,'long');")
+        self.db.execute("INSERT INTO t(id,name) VALUES(1,'ok');")
+        with self.assertRaises(SemanticError):self.db.execute("UPDATE t SET name='long' WHERE id=1;")
+        with self.assertRaises(SemanticError):self.db.inspect("CREATE TABLE bad(name VARCHAR(0));")
+    def test_system_catalog_is_a_multi_page_slotted_table(self):
+        for i in range(80):self.db.execute(f"CREATE TABLE table_{i}(id INT,name VARCHAR(20));")
+        rows=self.db.execute("SELECT table_name,column_name FROM pg_catalog WHERE table_name='table_79' ORDER BY column_order;")[0]["rows"]
+        self.assertEqual(rows,[{"table_name":"table_79","column_name":"id"},{"table_name":"table_79","column_name":"name"}])
+        self.assertGreaterEqual(self.db.stats()["allocated_pages"],2)
+        root=self.tmp.name;self.db.close();self.db=Database(root,2)
+        self.assertEqual(self.db.catalog.table("table_79").columns[1].name,"name")
     def test_update_order_by_and_system_catalog(self):
         self.db.execute("CREATE TABLE scores(id INT,name VARCHAR(10),score INT); INSERT INTO scores(id,name,score) VALUES(1,'A',70); INSERT INTO scores(id,name,score) VALUES(2,'B',80); INSERT INTO scores(id,name,score) VALUES(3,'C',80);")
         changed=self.db.execute("UPDATE scores SET score=score+5 WHERE id=2;")[0]
@@ -75,15 +98,8 @@ class EndToEndTests(unittest.TestCase):
         remaining=self.db.execute("SELECT id FROM bulk WHERE id>=290 ORDER BY id;")[0]["rows"]
         self.assertEqual([r["id"] for r in remaining],[290,291,292,293,294])
         self.assertFalse((Path(root)/"catalog.json").exists())
-        self.assertEqual(self.db.store.read_page(0)[:4],b"CAT1")
+        self.assertEqual(self.db.store.read_page(0)[:4],b"SYP1")
         self.assertGreaterEqual(self.db.stats()["allocated_pages"],3)
-    def test_column_row_and_action_permission(self):
-        self.db.execute("CREATE TABLE staff(id INT,name VARCHAR(20),dept VARCHAR(20)); INSERT INTO staff(id,name,dept) VALUES(1,'A','CS'); INSERT INTO staff(id,name,dept) VALUES(2,'B','EE');")
-        self.db.auth.grant("alice","staff",{"SELECT"},{"name","dept"},lambda r:r["dept"]=="CS")
-        rows=self.db.execute("SELECT name,dept FROM staff;",user="alice")[0]["rows"]
-        self.assertEqual(rows,[{"name":"A","dept":"CS"}])
-        with self.assertRaises(PermissionDenied):self.db.execute("SELECT id FROM staff;",user="alice")
-        with self.assertRaises(PermissionDenied):self.db.execute("DELETE FROM staff;",user="alice")
 
 
 if __name__=="__main__":unittest.main()

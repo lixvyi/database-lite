@@ -5,6 +5,8 @@ import os
 import zlib
 from pathlib import Path
 from threading import RLock
+from time import sleep
+from uuid import uuid4
 from .errors import CorruptPage, InvalidPage
 
 PAGE_SIZE = 4096
@@ -60,9 +62,13 @@ class PageFile:
     def _save_control(self):
         self.control["generation"]+=1;raw=json.dumps(self.control,ensure_ascii=False,sort_keys=True).encode()
         for path in self.control_paths:
-            temp=path.with_suffix(path.suffix+".tmp")
+            temp=path.with_name(path.name+f".{uuid4().hex}.tmp")
             with temp.open("wb") as f:f.write(raw);f.flush();os.fsync(f.fileno())
-            os.replace(temp,path)
+            for attempt in range(3):
+                try:os.replace(temp,path);break
+                except PermissionError:
+                    if attempt==2:raise
+                    sleep(.02*(attempt+1))
 
     def _grow_extent(self):
         start=self.control["page_count"]

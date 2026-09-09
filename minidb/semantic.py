@@ -7,10 +7,14 @@ class SemanticAnalyzer:
     def __init__(self,catalog:Catalog): self.catalog=catalog
     def analyze(self,stmt):
         if isinstance(stmt,CreateTableStmt):
+            if self.catalog.exists(stmt.table):
+                raise SemanticError(f"table '{stmt.table}' already exists",stmt.location)
             names=[c.name.lower() for c in stmt.columns]
             if len(names)!=len(set(names)): raise SemanticError("duplicate column name",stmt.location)
+            for column in stmt.columns:
+                if column.data_type=="VARCHAR" and column.length is not None and column.length<=0:
+                    raise SemanticError("VARCHAR length must be a positive integer",column.location)
             return stmt
-        if isinstance(stmt,ExplainStmt): self.analyze(stmt.statement); return stmt
         table=self.catalog.table(stmt.table,stmt.location)
         if table.name.lower()=="pg_catalog" and not isinstance(stmt,SelectStmt):
             raise SemanticError("system catalog 'pg_catalog' is read-only",stmt.location)
@@ -20,6 +24,7 @@ class SemanticAnalyzer:
             for name,value in zip(stmt.columns,stmt.values):
                 col=self.catalog.column(table,name,value.location); actual=self.expr(value,table)
                 if actual!="NULL" and actual!=col.data_type: raise SemanticError(f"column '{name}' expects {col.data_type}, but {actual} found",value.location)
+                self.check_varchar_length(col,value)
         elif isinstance(stmt,SelectStmt):
             if stmt.columns!=["*"]:
                 for name in stmt.columns:self.catalog.column(table,name,stmt.location)
@@ -33,6 +38,7 @@ class SemanticAnalyzer:
             for name,value in stmt.assignments:
                 col=self.catalog.column(table,name,value.location);actual=self.expr(value,table)
                 if actual!="NULL" and actual!=col.data_type:raise SemanticError(f"column '{name}' expects {col.data_type}, but {actual} found",value.location)
+                self.check_varchar_length(col,value)
             if stmt.where and self.expr(stmt.where,table)!="BOOL":raise SemanticError("WHERE expression must be BOOL",stmt.where.location)
         return stmt
     def expr(self,e,table):
@@ -55,3 +61,7 @@ class SemanticAnalyzer:
                 typ="BOOL"
         else: raise SemanticError("unknown expression node",e.location)
         e.inferred_type=typ; return typ
+    def check_varchar_length(self,column,value):
+        if column.data_type=="VARCHAR" and column.length is not None and isinstance(value,LiteralExpr) and value.value is not None:
+            if len(str(value.value))>column.length:
+                raise SemanticError(f"value for column '{column.name}' exceeds VARCHAR({column.length})",value.location)

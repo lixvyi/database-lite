@@ -22,7 +22,6 @@ def expr_text(e):
 
 class PlanBuilder:
     def build(self,s):
-        if isinstance(s,ExplainStmt): return PlanNode("Explain",{},[self.build(s.statement)])
         if isinstance(s,CreateTableStmt): return PlanNode("CreateTable",{"table":s.table,"columns":[(c.name,c.data_type,c.length) for c in s.columns]})
         if isinstance(s,InsertStmt): return PlanNode("Insert",{"table":s.table,"columns":s.columns,"values":s.values})
         if isinstance(s,DeleteStmt):

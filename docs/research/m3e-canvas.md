@@ -137,4 +137,7 @@ web/
 - 本文没有复用 m3e-canvas 源码或素材，只提炼公开仓库中的架构和交互模式。
 - 若以后直接复制代码，应遵守其 MIT 许可证并保留版权和许可声明。[LICENSE](https://github.com/lnkiai/m3e-canvas/blob/main/LICENSE)
 - 上游的 AI key 本地保存策略仅是其静态工具的安全边界说明，不应直接成为本项目权限/token 设计依据。[SECURITY.md](https://github.com/lnkiai/m3e-canvas/blob/main/SECURITY.md)
+# 研究备忘（不属于本次实现范围）
+
+本文只记录早期界面调研，出现的 EXPLAIN、权限、并发等内容均不是当前项目功能，也不得作为验收陈述。实际范围以 `docs/第三阶段验收矩阵.md` 为准。
 

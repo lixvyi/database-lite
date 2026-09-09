@@ -1,4 +1,5 @@
 import struct
+from ..errors import StorageError
 
 
 class RecordCodec:
@@ -9,9 +10,13 @@ class RecordCodec:
         for i,col in enumerate(cols):
             value=row.get(col.name)
             if value is None:nulls[i//8]|=1<<(i%8);continue
-            if col.data_type=="INT":body+=struct.pack("<q",int(value))
+            if col.data_type=="INT":
+                try:body+=struct.pack("<q",int(value))
+                except (OverflowError,struct.error,ValueError) as exc:raise StorageError(f"value for column '{col.name}' is outside 64-bit INT range") from exc
             else:
-                raw=str(value).encode("utf-8");body+=struct.pack("<I",len(raw))+raw
+                text=str(value)
+                if col.length is not None and len(text)>col.length:raise StorageError(f"value for column '{col.name}' exceeds VARCHAR({col.length})")
+                raw=text.encode("utf-8");body+=struct.pack("<I",len(raw))+raw
         return struct.pack("<H",len(cols))+nulls+body
     @staticmethod
     def decode(schema,data):

@@ -10,14 +10,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from minidb import Database as MiniDatabase
 from minidb.errors import MiniDBError
-from os_sim import QueryScheduler, StorageService
+from os_sim import StorageService
 from os_sim.page_file import PAYLOAD_SIZE
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "library.db"
 STATIC = ROOT / "static"
 MINIDB = MiniDatabase(ROOT / "minidb_demo", buffer_pages=8)
-OS_STORE = StorageService(ROOT / "os_sim_demo", cache_pages=8, policy="LRU", dirty_ratio=.75, background_interval=2.0)
+OS_STORE = StorageService(ROOT / "os_sim_demo", cache_pages=8, policy="LRU", dirty_ratio=.75)
 if "student" not in MINIDB.catalog.tables:
     MINIDB.execute("CREATE TABLE student(id INT,name VARCHAR(20),age INT); INSERT INTO student(id,name,age) VALUES(1,'Alice',20); INSERT INTO student(id,name,age) VALUES(2,'Bob',17);")
 
@@ -169,12 +169,6 @@ class Handler(SimpleHTTPRequestHandler):
                         if len(raw)>PAYLOAD_SIZE:raise ApiError(400,"内容超过一页容量")
                         result={"lsn":OS_STORE.write_page(pid,raw+bytes(PAYLOAD_SIZE-len(raw)))}
                     elif action=="checkpoint":result=OS_STORE.checkpoint()
-                    elif action=="workload":
-                        allocated=[p["page_id"] for p in OS_STORE.page_directory() if p["allocated"]]
-                        if not allocated:allocated=[OS_STORE.allocate_page()]
-                        scheduler=QueryScheduler(workers=8,queue_capacity=64)
-                        futures=[scheduler.submit(OS_STORE.read_page,allocated[i%len(allocated)]) for i in range(1000)]
-                        [f.result() for f in futures];result=scheduler.stats();scheduler.close()
                     else:raise ApiError(400,"未知 OS 仿真动作")
                     return self.send_json({"result":result,"status":OS_STORE.stats()})
             raise ApiError(404, "接口不存在")

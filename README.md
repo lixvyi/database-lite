@@ -1,6 +1,6 @@
 # 拾页 MiniDB
 
-一个把编译原理、操作系统和数据库原理串起来的教学型数据库：SQL 经过 Token、AST、语义检查、逻辑计划和规则优化，再由执行器通过统一页接口访问自研 4KB Page、LRU/FIFO Cache、WAL 与二进制表空间。MiniDB 内核不使用 SQLite；原图书室页面作为上层业务演示保留。
+一个把编译原理、操作系统和数据库原理串起来的教学型数据库。SQL 经过 Token、AST、语义检查、逻辑计划和规则优化，再由执行器通过统一页接口访问自研 4KB Page、LRU/FIFO Cache、WAL 与二进制表空间。基础范围严格对应课程指导书；每部分最多保留两个容易解释的扩展。MiniDB 内核不使用 SQLite，原图书室页面仅作为独立的上层业务演示保留。
 
 ## 快速启动
 
@@ -8,7 +8,7 @@
 .\start.bat
 ```
 
-打开 <http://127.0.0.1:8000>，进入“MiniDB 实验台”。Windows 也可双击 `start.bat`。
+打开 <http://127.0.0.1:8000/?lab=1> 可直接进入“MiniDB 实验台”。Windows 也可双击 `start.bat` 后点击左侧“MiniDB 实验台”。
 
 若系统已配置 Python，也可运行 `py -3 server.py`。命令行数据库入口为 `py -3 minidb_cli.py`。
 
@@ -38,7 +38,7 @@ minidb/
 ├─ parser.py ast.py                    # 递归下降 Parser 与 AST
 ├─ semantic.py catalog.py              # 名字绑定、类型检查、页 0 系统目录
 ├─ plan.py optimizer.py                # Logical Plan 与优化规则
-├─ execution.py auth.py engine.py      # 执行、并发、权限、流水线门面
+├─ execution.py engine.py              # 执行与流水线门面
 └─ storage/
    ├─ page.py                          # 4KB Slotted Page
    ├─ os_adapter.py                    # 数据库行页到 OS 页服务适配器
@@ -47,10 +47,9 @@ minidb/
 os_sim/
 ├─ page_file.py cache.py wal.py        # 页文件、替换策略与预写日志
 ├─ service.py interfaces.py            # 数据库唯一调用的存储服务接口
-└─ scheduler.py                        # 有界并发查询队列
 static/                                # 桌面可视化实验台
-tests/                                 # 单元、边界、权限、Fuzz、端到端测试
-docs/                                  # 文法、存储、优化、验收矩阵、双人报告
+tests/                                 # 单元、边界、Fuzz、持久化、端到端测试
+docs/                                  # 文法、存储、验收矩阵、三人分工与报告
 ```
 
 ## 测试
@@ -64,11 +63,10 @@ py -3 -m unittest discover -s tests -v
 ```powershell
 py -3 os_sim_cli.py allocate
 py -3 os_sim_cli.py status
-py -3 os_sim_cli.py queue-demo --queries 1000 --workers 8
 py -3 benchmarks/os_benchmark.py
 ```
 
-浏览器访问 <http://127.0.0.1:8000/?os=1>，可以观察 Extent 页目录、Buffer Frames、脏页、WAL/Checkpoint LSN、缓存事件和 1000 查询队列。
+浏览器访问 <http://127.0.0.1:8000/?os=1>，可以观察 Extent 页目录、Buffer Frames、脏页、WAL/Checkpoint LSN 和缓存事件。
 
 第二份 PPT 对应资料见 `docs/操作系统模块验收矩阵.md`、`操作系统模块设计取舍.md`、`操作系统模块效果证据.md` 和 `操作系统代码答辩.md`。
 
@@ -76,4 +74,4 @@ py -3 benchmarks/os_benchmark.py
 
 ## 当前边界
 
-核心已实现 CREATE/INSERT/SELECT/DELETE、表达式、精确错误、语义检查、Plan、规则优化、系统目录、页式持久化、WAL 恢复和基础权限/并发。指导书可选项只选做 `UPDATE`、`ORDER BY` 两项；JOIN、GROUP BY、索引、MVCC 和代价优化器明确列为边界，不会冒充成已完成能力。
+核心已实现 CREATE/INSERT/SELECT/DELETE、表达式、精确错误、语义检查、Plan、规则优化、槽页系统目录和页式持久化。SQL 与执行扩展只选 `UPDATE`、`ORDER BY`；存储扩展只选 Extent 分配、页级 redo WAL/Checkpoint。未实现 EXPLAIN、JOIN、GROUP BY、索引、权限、查询并发、MVCC 和代价优化器。
