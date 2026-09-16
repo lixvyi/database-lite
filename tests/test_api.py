@@ -84,6 +84,25 @@ class ApiTest(unittest.TestCase):
         self.assertIn("68 65 6C 6C 6F", detail["hex_rows"][0])
         self.assertIn("hello-os-page", detail["preview_text"])
 
+    def test_os_seqscan_demo_emits_prefetch_events(self):
+        status, data = self.request("POST", "/api/os/action", {"action": "seqscan_demo"})
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(data["result"]["rows"], 300)
+        self.assertGreaterEqual(len(data["result"]["table_pages"]), 2)
+        status, detail = self.request("GET", "/api/os/status")
+        self.assertEqual(status, 200)
+        names = [event["event"] for event in detail["events"]]
+        self.assertIn("prefetch", names)
+        self.assertIn("hit", names)
+
+    def test_os_page_detail_hides_structured_binary_preview(self):
+        status, _ = self.request("POST", "/api/os/action", {"action": "seqscan_demo"})
+        self.assertEqual(status, 200)
+        status, detail = self.request("GET", "/api/os/page?page_id=0")
+        self.assertEqual(status, 200)
+        self.assertIn("结构化二进制页", detail["preview_text"])
+        self.assertIn("53 59 50 31", detail["hex_rows"][0])
+
     def test_create_book(self):
         status, data = self.request("POST", "/api/books", {"isbn":"TEST-001","title":"测试书","author":"测试者","total_copies":2})
         self.assertEqual(status, 201)

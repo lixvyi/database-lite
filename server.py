@@ -11,6 +11,7 @@ from threading import Lock
 from urllib.parse import parse_qs, urlparse
 from minidb import Database as MiniDatabase
 from minidb.errors import MiniDBError
+from minidb.storage.page import MAGIC as SLOTTED_PAGE_MAGIC
 from os_sim import QueryScheduler, StorageService
 from os_sim.cache import PageCache
 from os_sim.page_file import PAGE_SIZE, PAYLOAD_SIZE
@@ -20,7 +21,7 @@ STATIC = ROOT / 'static'
 OS_STORE_PATH = ROOT / 'os_sim_demo'
 CACHE_POLICIES = list(PageCache.SUPPORTED_POLICIES)
 MINIDB = MiniDatabase(ROOT / 'minidb_demo', buffer_pages=8)
-OS_STORE = StorageService(OS_STORE_PATH, cache_pages=8, policy='LRU', dirty_ratio=0.75, background_interval=2.0)
+OS_STORE = StorageService(OS_STORE_PATH, cache_pages=4, policy='LRU', dirty_ratio=0.75, background_interval=2.0)
 OS_STORE_LOCK = Lock()
 if 'student' not in MINIDB.catalog.tables:
     MINIDB.execute("CREATE TABLE student(id INT,name VARCHAR(20),age INT); INSERT INTO student(id,name,age) VALUES(1,'Alice',20); INSERT INTO student(id,name,age) VALUES(2,'Bob',17);")
@@ -57,6 +58,22 @@ def os_status():
     with OS_STORE_LOCK:
         return {'stats': OS_STORE.stats(), 'pages': OS_STORE.page_directory(), 'frames': [{'page_id': f.page_id, 'generation': f.generation, 'dirty': f.dirty, 'pin_count': f.pin_count, 'page_lsn': f.page_lsn, 'hits': f.hits, 'ref_bit': f.ref_bit} for f in OS_STORE.cache.frames.values()], 'events': OS_STORE.cache.recent_events(30), 'policies': CACHE_POLICIES}
 
+def preview_text(payload):
+    """为页详情生成更友好的文本预览。"""
+    preview = payload[:128].rstrip(b'\x00')
+    if not preview:
+        return ''
+    if payload[:4] == SLOTTED_PAGE_MAGIC:
+        return '结构化二进制页（MiniDB 槽页），请结合下方十六进制预览查看。'
+    try:
+        text = preview.decode('utf-8')
+    except UnicodeDecodeError:
+        return '结构化二进制页，请结合下方十六进制预览查看。'
+    printable = sum((1 for ch in text if ch.isprintable() or ch in '\r\n\t'))
+    if printable / max(len(text), 1) < 0.85:
+        return '结构化二进制页，请结合下方十六进制预览查看。'
+    return text
+
 def os_page_detail(page_id):
     """完成os page detail相关处理。"""
     with OS_STORE_LOCK:
@@ -74,8 +91,31 @@ def os_page_detail(page_id):
             chunk = preview[start:start + 16]
             hex_rows.append(' '.join((f'{byte:02X}' for byte in chunk)))
             ascii_rows.append(''.join((chr(byte) if 32 <= byte < 127 else '.' for byte in chunk)))
-        detail.update({'preview_text': preview.rstrip(b'\x00').decode('utf-8', errors='replace'), 'hex_rows': hex_rows, 'ascii_rows': ascii_rows})
+        detail.update({'preview_text': preview_text(payload), 'hex_rows': hex_rows, 'ascii_rows': ascii_rows})
         return detail
+
+def run_os_seqscan_demo():
+    """重建 OS 仿真台并运行一次带 prefetch 的顺序扫描演示。"""
+    policy = OS_STORE.cache.policy
+    rebuild_os_store(policy=policy, reset=True)
+    demo = MiniDatabase(ROOT / 'os_seqscan_demo', buffer_pages=OS_STORE.cache.capacity, store=OS_STORE)
+    try:
+        demo.execute("CREATE TABLE seqscan_demo(id INT,name VARCHAR(20));")
+        demo.execute("".join((f"INSERT INTO seqscan_demo(id,name) VALUES({i},'row{i}');" for i in range(300))))
+        OS_STORE.checkpoint()
+        OS_STORE.cache.frames.clear()
+        OS_STORE.cache.events.clear()
+        OS_STORE.cache.hits = 0
+        OS_STORE.cache.misses = 0
+        OS_STORE.cache.evictions = 0
+        OS_STORE.cache.flushes = 0
+        OS_STORE.cache.sequence = 0
+        OS_STORE.cache.clock_hand = 0
+        (OS_STORE_PATH / 'cache_events.ndjson').unlink(missing_ok=True)
+        rows = demo.execute("SELECT id FROM seqscan_demo ORDER BY id DESC;")[0]['rows']
+        return {'rows': len(rows), 'table_pages': OS_STORE.get_table_pages('seqscan_demo')}
+    finally:
+        demo.close()
 
 def rebuild_os_store(policy='LRU', reset=False):
     """完成rebuild os store相关处理。"""
@@ -88,7 +128,7 @@ def rebuild_os_store(policy='LRU', reset=False):
             shutil.rmtree(OS_STORE_PATH, ignore_errors=True)
         else:
             (OS_STORE_PATH / 'cache_events.ndjson').unlink(missing_ok=True)
-        OS_STORE = StorageService(OS_STORE_PATH, cache_pages=8, policy=policy, dirty_ratio=0.75, background_interval=2.0)
+        OS_STORE = StorageService(OS_STORE_PATH, cache_pages=4, policy=policy, dirty_ratio=0.75, background_interval=2.0)
     return os_status()
 
 class ApiError(Exception):
@@ -237,6 +277,8 @@ class Handler(SimpleHTTPRequestHandler):
                         [f.result() for f in futures]
                         result = scheduler.stats()
                         scheduler.close()
+                    elif action == 'seqscan_demo':
+                        result = run_os_seqscan_demo()
                     else:
                         raise ApiError(400, '未知 OS 仿真动作')
                     return self.send_json({'result': result, 'status': OS_STORE.stats()})

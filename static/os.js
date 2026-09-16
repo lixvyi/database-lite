@@ -97,7 +97,7 @@ async function renderOS() {
       </div>
       <section class="os-panel">
         <div class="section-head"><h3>页目录 · ${stats.allocated_pages}/${stats.total_pages} 已分配</h3><div class="os-actions">
-          <button class="secondary" data-os="allocate">分配页</button><button class="secondary" data-os="write">修改内存页</button><button class="primary" data-os="checkpoint">Checkpoint</button><button class="secondary" data-os="workload">运行 1000 查询</button><button class="secondary danger" data-os="reset">重置仿真台</button>
+          <button class="secondary" data-os="allocate">分配页</button><button class="secondary" data-os="write">修改内存页</button><button class="primary" data-os="checkpoint">Checkpoint</button><button class="secondary" data-os="workload">运行 1000 查询</button><button class="secondary" data-os="seqscan_demo">顺序扫描演示</button><button class="secondary danger" data-os="reset">重置仿真台</button>
         </div></div>
         <div class="page-map">${pages}</div>
         <div class="os-legend">
@@ -107,7 +107,7 @@ async function renderOS() {
         </div>
         <h3>Buffer Frames</h3>
         ${table(['Page', 'Generation', 'Dirty', 'Pin', 'Hits', 'Ref', 'Page LSN'], frames)}
-        <p class="os-note">点页格子或缓存帧即可查看右侧详情。LFU 重点观察 Hits，CLOCK 重点观察 Ref，Prefetch 会在顺序扫描时提前把 next_page 装入缓存。</p>
+        <p class="os-note">点页格子或缓存帧即可查看右侧详情。LFU 重点观察 Hits，CLOCK 重点观察 Ref；点击“顺序扫描演示”后，可在事件日志里观察 miss → prefetch → hit 的链路。</p>
       </section>
       <div class="os-grid">
         <section class="os-panel">
@@ -175,18 +175,32 @@ async function osAction(action, state) {
   const body = { action };
   if (action === 'reset') body.policy = state.stats.policy;
   if (action === 'write') {
-    const used = state.pages.find(page => page.allocated);
-    if (!used) {
-      await api('/api/os/action', { method: 'POST', body: JSON.stringify({ action: 'allocate' }) });
-      return osAction('write', await api('/api/os/status'));
+    const selected = state.pages.find(page => page.page_id === osUIState.selectedPage);
+    if (!selected) {
+      toast('当前没有选中页，请先点击页格子。');
+      return;
     }
-    body.page_id = used.page_id;
+    if (!selected.allocated) {
+      const allocated = state.pages.some(page => page.allocated);
+      if (!allocated) {
+        await api('/api/os/action', { method: 'POST', body: JSON.stringify({ action: 'allocate' }) });
+        return osAction('write', await api('/api/os/status'));
+      }
+      toast(`Page ${selected.page_id} 尚未分配，请先选择已分配页。`);
+      return;
+    }
+    body.page_id = selected.page_id;
     body.text = 'memory update ' + new Date().toISOString();
-    osUIState.selectedPage = used.page_id;
+    osUIState.selectedPage = selected.page_id;
   }
   try {
     const data = await api('/api/os/action', { method: 'POST', body: JSON.stringify(body) });
-    toast(action === 'workload' ? `1000 个查询完成，最大队列 ${data.result.max_depth}` : action === 'reset' ? (data.message || 'OS 仿真台已重置') : '操作完成');
+    toast(
+      action === 'workload' ? `1000 个查询完成，最大队列 ${data.result.max_depth}`
+      : action === 'seqscan_demo' ? `顺序扫描已完成，扫描 ${data.result.rows} 行，表页 ${data.result.table_pages.join(' -> ')}`
+      : action === 'reset' ? (data.message || 'OS 仿真台已重置')
+      : '操作完成'
+    );
     await renderOS();
   } catch (error) { toast(error.message); }
 }
