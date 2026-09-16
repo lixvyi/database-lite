@@ -9,6 +9,11 @@ class OSBufferAdapter:
         self.store = store
         self.pending = {}
 
+    def prefetch(self, page_id):
+        """完成prefetch相关处理。"""
+        if page_id is not None:
+            self.store.prefetch_page(page_id)
+
     @contextmanager
     def page(self, page_id):
         """以上下文方式固定并访问缓存页。"""
@@ -22,6 +27,13 @@ class OSBufferAdapter:
     def new_page(self):
         """创建并固定一个新缓存页。"""
         page_id = self.store.allocate_page()
+        page = SlottedPage(page_id)
+        self.pending[page_id] = page
+        return page
+
+    def new_table_page(self, table_name):
+        """完成new table page相关处理。"""
+        page_id = self.store.append_table_page(table_name)
         page = SlottedPage(page_id)
         self.pending[page_id] = page
         return page

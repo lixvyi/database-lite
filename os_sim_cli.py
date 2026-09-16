@@ -15,7 +15,7 @@ def main():
     """解析命令行参数并运行入口逻辑。"""
     parser = argparse.ArgumentParser(description='MiniDB 独立 OS 存储仿真实体')
     parser.add_argument('--data', default='os_sim_data')
-    parser.add_argument('--policy', choices=['LRU', 'FIFO'], default='LRU')
+    parser.add_argument('--policy', choices=['FIFO', 'LFU', 'LRU', 'CLOCK'], default='LRU')
     parser.add_argument('--cache-pages', type=int, default=8)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('status')
@@ -32,7 +32,7 @@ def main():
     store = StorageService(Path(args.data), args.cache_pages, args.policy)
     try:
         if args.command == 'status':
-            result = {'stats': store.stats(), 'allocated': [p for p in store.page_directory() if p['allocated']]}
+            result = {'stats': store.stats(), 'allocated': [p for p in store.page_directory() if p['allocated']], 'frames': [{'page_id': f.page_id, 'generation': f.generation, 'dirty': f.dirty, 'pin_count': f.pin_count, 'page_lsn': f.page_lsn} for f in store.cache.frames.values()], 'events': store.cache.recent_events(30)}
         elif args.command == 'allocate':
             result = {'page_id': store.allocate_page()}
         elif args.command == 'release':

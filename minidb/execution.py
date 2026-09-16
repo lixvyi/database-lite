@@ -69,10 +69,15 @@ class TableHeap:
 
     def scan(self, schema):
         """顺序扫描表中的全部有效记录。"""
-        for pid in self._pages(schema):
+        pid = schema.first_page
+        while pid is not None and pid != NO_PAGE:
             with self.buffer.page(pid) as page:
+                next_pid = page.next_page
+                if next_pid != NO_PAGE:
+                    self.buffer.prefetch(next_pid)
                 for slot, payload in page.records():
                     yield ((pid, slot), self.codec.decode(schema, payload))
+            pid = next_pid
 
     def insert(self, schema, row):
         """解析INSERT语句。"""
@@ -84,7 +89,7 @@ class TableHeap:
                 slot = page.insert(payload)
                 if slot is not None:
                     return (pid, slot)
-        page = self.buffer.new_page()
+        page = self.buffer.new_table_page(schema.name)
         pid = page.page_id
         slot = page.insert(payload)
         if slot is None:
