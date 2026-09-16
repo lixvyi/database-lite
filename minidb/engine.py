@@ -15,11 +15,12 @@ from os_sim import StorageService
 class Database:
     """SQL → Token → AST → Semantic → Plan → Optimize → Execute → Page/Disk。"""
 
-    def __init__(self, directory='minidb_data', buffer_pages=16):
+    def __init__(self, directory='minidb_data', buffer_pages=16, store=None):
         """初始化对象状态和依赖。"""
         root = Path(directory)
         root.mkdir(parents=True, exist_ok=True)
-        self.store = StorageService(root / 'storage', buffer_pages, 'LRU', dirty_ratio=0.75)
+        self.owns_store = store is None
+        self.store = store if store is not None else StorageService(root / 'storage', buffer_pages, 'LRU', dirty_ratio=0.75)
         self.catalog = PagedCatalog(self.store)
         self.buffer = OSBufferAdapter(self.store)
         self.semantic = SemanticAnalyzer(self.catalog)
@@ -70,4 +71,5 @@ class Database:
 
     def close(self):
         """刷新状态并释放底层资源。"""
-        self.store.close()
+        if self.owns_store:
+            self.store.close()
