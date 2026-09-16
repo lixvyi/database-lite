@@ -1,5 +1,3 @@
-# 前端页面功能（OS 存储仿真台）：不直接在页面渲染，而是支撑数据库侧建表后的
-# 表↔页映射；服务层 get_table_pages / append_table_page 依赖它。
 """
 表到页集合映射模块。
 
@@ -8,60 +6,59 @@
 - 为操作系统子系统提供 `get_table_pages`、`append_table_page` 所需的底层状态。
 - 在程序重启后恢复映射，满足页式存储子系统的验收口径。
 """
-
 from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
 from threading import RLock
-
 from .errors import IoError
-
 
 class TablePageMap:
     """持久化维护表名到页号列表的映射。"""
 
     def __init__(self, path: str | Path):
+        """初始化对象状态和依赖。"""
         self.path = Path(path)
         self.lock = RLock()
         self.tables: dict[str, list[int]] = {}
         self._load()
 
     def _normalize(self, table_name: str) -> str:
+        """完成normalize相关处理。"""
         return table_name.lower()
 
     def _load(self) -> None:
+        """完成load相关处理。"""
         if not self.path.exists():
             self.tables = {}
             return
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = json.loads(self.path.read_text(encoding='utf-8'))
         except (OSError, ValueError) as exc:
-            raise IoError(f"failed to load table map: {self.path}") from exc
-        self.tables = {
-            self._normalize(name): [int(page_id) for page_id in page_ids]
-            for name, page_ids in raw.items()
-        }
+            raise IoError(f'failed to load table map: {self.path}') from exc
+        self.tables = {self._normalize(name): [int(page_id) for page_id in page_ids] for name, page_ids in raw.items()}
 
     def _save(self) -> None:
+        """完成save相关处理。"""
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            payload = json.dumps(self.tables, ensure_ascii=False, sort_keys=True).encode("utf-8")
-            with tmp.open("wb") as handle:
+            tmp = self.path.with_suffix(self.path.suffix + '.tmp')
+            payload = json.dumps(self.tables, ensure_ascii=False, sort_keys=True).encode('utf-8')
+            with tmp.open('wb') as handle:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp, self.path)
         except OSError as exc:
-            raise IoError(f"failed to save table map: {self.path}") from exc
+            raise IoError(f'failed to save table map: {self.path}') from exc
 
     def get_table_pages(self, table_name: str) -> list[int]:
+        """完成get table pages相关处理。"""
         with self.lock:
             return list(self.tables.get(self._normalize(table_name), []))
 
     def register_page(self, table_name: str, page_id: int) -> None:
+        """完成register page相关处理。"""
         key = self._normalize(table_name)
         with self.lock:
             pages = self.tables.setdefault(key, [])
@@ -69,7 +66,8 @@ class TablePageMap:
                 pages.append(page_id)
                 self._save()
 
-    def unregister_page(self, page_id: int, table_name: str | None = None) -> None:
+    def unregister_page(self, page_id: int, table_name: str | None=None) -> None:
+        """完成unregister page相关处理。"""
         with self.lock:
             changed = False
             if table_name is not None:
@@ -92,6 +90,7 @@ class TablePageMap:
                 self._save()
 
     def append_page(self, table_name: str, allocator) -> int:
+        """完成append page相关处理。"""
         page_id = allocator()
         self.register_page(table_name, page_id)
         return page_id

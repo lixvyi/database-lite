@@ -1,0 +1,232 @@
+拾页 MiniDB 答辩现场所有输入
+==============================
+
+说明：
+1. “【提示】”开头的行不要输入。
+2. PowerShell命令在项目根目录的PowerShell中输入。
+3. SQL在MiniDB实验台或MiniDB CLI中输入。
+4. 每次重新演练时，把defense_final_01和defense_os_01末尾编号改为02、03，避免表已存在或旧数据干扰。
+
+
+一、进入项目与启动服务
+======================
+
+cd C:\Users\ASUS\Documents\Codex\2026-09-07\r-g\database-lite
+
+.\start.bat
+
+【提示】浏览器地址：
+http://127.0.0.1:8000/?lab=1
+http://127.0.0.1:8000/?os=1
+
+
+二、成员A SQL编译器输入
+======================
+
+【提示】先在PowerShell中创建演示表：
+
+py -3 minidb_cli.py --data defense_final_01 --sql "CREATE TABLE t(id INT,name VARCHAR(10),score INT);"
+
+
+【提示】在MiniDB实验台输入，点击“编译并检查”：
+
+SELECT name FROM t
+WHERE 1=1 AND score>10+8
+ORDER BY score DESC;
+
+
+【提示】词法错误测试：
+
+SELECT @;
+
+
+【提示】语法错误测试，故意不要补分号：
+
+SELECT name FROM t
+
+
+【提示】列不存在的语义错误：
+
+SELECT bad FROM t;
+
+
+【提示】类型不匹配的语义错误：
+
+INSERT INTO t(id,name,score) VALUES('x',1,80);
+
+
+【提示】INSERT列数不匹配的备用语义错误：
+
+INSERT INTO t(id,name,score) VALUES(1,'A');
+
+
+【提示】VARCHAR长度超限的备用语义错误：
+
+INSERT INTO t(id,name,score) VALUES(1,'ABCDEFGHIJK',80);
+
+
+三、成员C 数据库引擎输入
+========================
+
+【提示】在PowerShell中进入MiniDB交互模式：
+
+py -3 minidb_cli.py --data defense_final_01
+
+
+【提示】进入交互模式后，依次手敲：
+
+INSERT INTO t(id,name,score) VALUES(1,'A',80);
+
+INSERT INTO t(id,name,score) VALUES(2,'B',90);
+
+SELECT name,score FROM t WHERE score>=80 ORDER BY score DESC;
+
+UPDATE t SET score=score+5 WHERE id=1;
+
+SELECT * FROM t ORDER BY score DESC;
+
+DELETE FROM t WHERE id=2;
+
+SELECT * FROM t;
+
+
+【提示】查询系统目录：
+
+SELECT table_name,column_name,data_type,first_page
+FROM pg_catalog
+ORDER BY table_name,column_name;
+
+
+【提示】系统目录只读错误测试：
+
+DELETE FROM pg_catalog;
+
+
+【提示】退出MiniDB交互模式：
+
+.quit
+
+
+【提示】退出后，在PowerShell中重新打开数据库，验证持久化：
+
+py -3 minidb_cli.py --data defense_final_01 --sql "SELECT * FROM t;"
+
+
+四、成员B 操作系统页式存储输入
+================================
+
+【提示】在PowerShell中依次输入：
+
+py -3 os_sim_cli.py --data defense_os_01 allocate
+
+py -3 os_sim_cli.py --data defense_os_01 write 0 "hello page"
+
+py -3 os_sim_cli.py --data defense_os_01 read 0
+
+py -3 os_sim_cli.py --data defense_os_01 status
+
+py -3 os_sim_cli.py --data defense_os_01 checkpoint
+
+
+【提示】页面释放和复用测试：
+
+py -3 os_sim_cli.py --data defense_os_01 release 0
+
+py -3 os_sim_cli.py --data defense_os_01 allocate
+
+
+五、MiniDB最短五分钟测试集
+==========================
+
+【提示】成员A：
+
+SELECT name FROM t
+WHERE 1=1 AND score>10+8
+ORDER BY score DESC;
+
+SELECT @;
+
+SELECT bad FROM t;
+
+
+【提示】成员C：
+
+INSERT INTO t(id,name,score) VALUES(1,'A',80);
+
+UPDATE t SET score=score+5 WHERE id=1;
+
+SELECT * FROM t;
+
+DELETE FROM t WHERE id=1;
+
+
+【提示】成员B，在PowerShell中输入：
+
+py -3 os_sim_cli.py --data defense_os_01 allocate
+
+py -3 os_sim_cli.py --data defense_os_01 write 0 "hello page"
+
+py -3 os_sim_cli.py --data defense_os_01 read 0
+
+py -3 os_sim_cli.py --data defense_os_01 status
+
+
+六、网页失败时的CLI备用输入
+==========================
+
+【提示】只检查编译过程：
+
+py -3 minidb_cli.py --data defense_final_01 --inspect --sql "SELECT name FROM t WHERE score>10+8;"
+
+
+【提示】执行查询：
+
+py -3 minidb_cli.py --data defense_final_01 --sql "SELECT * FROM t;"
+
+
+【提示】查看OS状态：
+
+py -3 os_sim_cli.py --data defense_os_01 status
+
+
+七、使用全新目录重新开始
+========================
+
+【提示】如果提示表已存在，改用新目录：
+
+py -3 minidb_cli.py --data defense_final_02 --sql "CREATE TABLE t(id INT,name VARCHAR(10),score INT);"
+
+
+【提示】如果OS演示目录损坏，改用新目录：
+
+py -3 os_sim_cli.py --data defense_os_02 allocate
+
+py -3 os_sim_cli.py --data defense_os_02 write 0 "hello page"
+
+py -3 os_sim_cli.py --data defense_os_02 read 0
+
+
+八、自动测试与性能测试
+======================
+
+【提示】在项目根目录的PowerShell中输入：
+
+py -3 -m unittest discover -s tests -v
+
+py -3 benchmarks/os_benchmark.py
+
+
+九、Git检查输入
+===============
+
+git status
+
+git log --oneline -10
+
+
+十、命令帮助
+============
+
+py -3 minidb_cli.py --help
+
+py -3 os_sim_cli.py --help
